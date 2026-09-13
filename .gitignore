@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Data (large / provided separately — do not commit the raw datasets)
+data/dataset_a/
+data/dataset_b/
+*.zip
+
+# Outputs are regenerated
+outputs/*.jsonl
+!outputs/.gitkeep
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
