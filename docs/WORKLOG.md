@@ -35,3 +35,49 @@ runner (`tests/run_tests.py`). 8/8 passing.
 **Fixture:** committed one real multi-chunk session, slimmed to the fields the
 pipeline reads (12.8 MB → 0.9 MB), so the integration test is realistic but the
 repo stays light. Raw datasets are git-ignored.
+
+---
+
+## Stage 1 — Annotate
+
+**Goal:** tag every event with `(route, document, app_class, completion button)`
+so later stages never touch raw JSON shape.
+
+**Key check before writing any code:** confirmed that `context.active_browser_tab.url`
+is populated on almost every event type while the browser is foreground
+(`mouse_scroll`, `keystroke`, `mouse_click`, ... not just `browser_navigation`).
+This meant "is the route live right now" can be computed per-event directly,
+without special-casing navigation events — simpler and more robust than the
+alternative (tracking navigation events only and assuming the route holds
+until the next one).
+
+**Design decisions:**
+- **Route regex requires ≥1 letter after `#/`** — guards against a bare `#/`
+  fragment (seen during page transitions) being read as an empty route.
+- **`route` (forward-filled) vs `on_route` (live) are kept separate.** A
+  Notepad event inherits the last known route (so it's correctly attributed
+  to the task it supports) but is *not* "on_route" — Stage 2's boundary logic
+  needs this distinction to avoid treating a supporting-tool dip as a route
+  change.
+- **Document forward-fills too, and persists across app switches** — verified
+  necessary: a task can open a Word doc, then work in the browser, and the
+  doc should still be "the current reference document" for that span. This is
+  what Stage 2's document-mode override (for the ~7-minute contract-review
+  case found in Dataset B) depends on.
+- **Completion button prefix vs verb split.** The prefix (`rt`, `pi`, `la`...)
+  is the stable, structural signal (corroborates the route). The verb
+  (`confirm`/`approve`/`register` in A vs `ok` in B) is captured but never
+  matched on directly — this was the exact thing that would have silently
+  broken cross-dataset detection if hard-coded (found via testing Dataset B
+  sessions against Dataset A's button vocabulary; see prior exploration).
+- **CSS class captured, not just presence of a button** — `success` vs
+  `warn`/`danger` distinguishes a positive completion from a query/flag
+  variant. Verified on the fixture: 32 completion clicks, 28 `success`, 4
+  `warn`/`danger` — this is exactly the "different handling patterns within
+  the same process" signal Step 2 needs, coming for free out of Stage 1.
+
+**Testing:** 23 new unit tests — one per extraction function in isolation
+(route/port/document/completion), forward-fill and liveness behaviour on
+synthetic event sequences, plus one integration smoke test against the real
+fixture. 31/31 tests passing (8 parser + 23 annotate).
+
