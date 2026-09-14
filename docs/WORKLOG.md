@@ -81,3 +81,38 @@ until the next one).
 synthetic event sequences, plus one integration smoke test against the real
 fixture. 31/31 tests passing (8 parser + 23 annotate).
 
+---
+
+## Stage 2 — Segment
+
+**Goal:** turn annotated events into raw segments using route changes and
+completion clicks as boundaries, with a document-mode override for tasks that
+legitimately span several routes.
+
+**Bug caught by tests, not by eyeballing:** the first version of
+`merge_micro_segments` only absorbed a short segment into a *same-route*
+neighbour. A real flicker can land on a *different* route for a single event
+(the stale-tab-context case found earlier in Dataset A) — the test written
+for exactly that case failed, correctly, because the old code left the
+flicker unmerged. Fixed by absorbing any short segment into its neighbour
+regardless of route match.
+
+**Second bug, same root cause:** absorbing the flicker backward left the
+segment on the *other* side of it artificially separate, even though it's
+the same continuous task. Added `coalesce_adjacent_same_route()` as an
+explicit final pass — micro-merge absorbs the flicker, coalesce rejoins what
+was only ever split by that flicker.
+
+**One test itself was wrong, caught the same way:** `document-mode does not
+collapse long segments` assumed the *already-merged* span blocks further
+collapsing once it's long. It doesn't, by design — a real multi-route
+document task (the 7-minute contract-review case from Dataset B) is built
+from many short hops and needs to keep growing. The check is on the
+*incoming* hop's own duration, not the accumulated total. Fixed the test to
+match the intended design rather than changing the design to match a wrong
+test.
+
+**Result on the fixture:** 25 segments, 20-90s each, every one closed out by
+a completion click. 44/44 tests passing overall.
+
+
