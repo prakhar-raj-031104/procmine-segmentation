@@ -53,18 +53,30 @@ push, with its own timestamp, instead of one big dump.
    ```
    This is a normal fast-forward merge — the bundle behaves like a remote.
 
-3. **Push to GitHub as usual:**
+3. **Pull the new stage tag too** (tags don't come across with `pull`, they
+   need a separate fetch):
+   ```bash
+   git fetch /path/to/stage1-annotate.bundle 'refs/tags/*:refs/tags/*'
+   ```
+
+4. **Push everything to GitHub:**
    ```bash
    git push origin main
    git push origin --tags
    ```
 
-4. **Verify:**
+5. **Verify:**
    ```bash
    git log --oneline --decorate
+   git tag -l
    ```
    You should see the new stage's commits and its tag on top of your existing
    history — and GitHub will show a new push event for this stage.
+
+> This exact 4-command sequence (steps 2–4) was tested end-to-end against a
+> simulated remote before being written down here, including the easy-to-miss
+> detail that tags need their own `fetch` — `git pull` alone does not bring
+> new tags across.
 
 ## Notes
 
