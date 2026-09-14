@@ -115,4 +115,29 @@ test.
 **Result on the fixture:** 25 segments, 20-90s each, every one closed out by
 a completion click. 44/44 tests passing overall.
 
+---
+
+## Stage 3 — Clean
+
+**Goal:** absorb dashboard (navigation-only) segments into the task they lead
+to, and measure how much of the session ends up covered by a segment at all.
+
+**Design note recorded up front:** there's nothing left to "filter" in the
+sense of removing noise segments — Stage 2 only ever creates a segment where
+a route was seen, so pure off-task stretches (terminal, file explorer) were
+never captured as segments to begin with. What's left is accounting for the
+gap, not removing anything further.
+
+**Cross-check against ground truth:** computed coverage on the fixture is
+94.3%, but the session's declared `noise_rate` in `gt_manifest.json` implies
+85% coverage. Our segments are running a bit more generous than the true
+task boundaries — plausibly from weak-anchor inheritance pulling idle time
+around real work into the segment either side of it. Not fixed here; this is
+exactly the kind of gap Stage 5's real boundary-F1 evaluation is for, and
+it's a more honest number to carry into that than assuming clean output.
+
+**Result:** dashboard segment (17.6s) correctly absorbed on the fixture, 0
+segments lost from further downstream time. 54/54 tests passing overall.
+
+
 
