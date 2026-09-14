@@ -139,5 +139,30 @@ it's a more honest number to carry into that than assuming clean output.
 **Result:** dashboard segment (17.6s) correctly absorbed on the fixture, 0
 segments lost from further downstream time. 54/54 tests passing overall.
 
+---
+
+## Stage 4 — Label
+
+**Goal:** canonical label per segment from its route, plus a separate
+variant tag from completion-button class.
+
+**Design decision worth recording:** variant (success/query/flagged) is kept
+out of the label string entirely, on its own field. Folding it in would have
+split `resident_tax_check` into different-looking labels depending on
+outcome — directly working against the "same process, same label"
+requirement. Variant exists purely for Step 2's "different handling
+patterns" analysis.
+
+**Fallback for unseen routes:** any route not in the known table gets
+`process_<route>` rather than failing — needed since Dataset B may contain
+routes not present in the Dataset A sessions used to build this.
+
+**Result on the fixture:** 5 distinct labels, each perfectly consistent with
+its route (verified per-route with a strict single-label assertion, not
+spot-checked). Variant mix: 21 standard, 2 flagged, 1 query — matches the
+completion-button evidence found back in Stage 1. 71/71 tests passing
+overall.
+
+
 
 
