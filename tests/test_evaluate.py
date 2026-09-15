@@ -7,6 +7,7 @@ from procseg.evaluate import (
     boundary_scores,
     evaluate_session,
     label_purity,
+    list_gt_sessions,
     load_gt_boundaries,
     load_gt_executions,
     mean_iou,
@@ -157,3 +158,19 @@ def test_evaluate_session_on_extension_down_fixture_no_longer_returns_zero():
     assert result.n_predicted > 5  # was 0 before the fallback mode existed
     assert result.overall_purity > 0.0
     assert result.boundary_at[8.0]["f1"] > 0.0
+
+
+# --- list_gt_sessions --------------------------------------------------------
+
+def test_list_gt_sessions_finds_both_fixtures():
+    sample_a_dir = os.path.join(os.path.dirname(__file__), "..", "data", "sample_a")
+    sessions = list_gt_sessions(sample_a_dir)
+    names = {os.path.basename(s) for s in sessions}
+    assert names == {"ses_20260701-124550-LAPTOP-0IM1OHQH", "ses_20260630-121953-LAPTOP-R36BQBTE"}
+
+
+def test_list_gt_sessions_empty_for_dir_without_ground_truth():
+    empty_dir = os.path.dirname(FIXTURE)  # data/sample_a itself has no gt_manifest.json directly in it
+    # use a directory that genuinely has none: the fixture's own chunk folder
+    chunk_dir = os.path.join(FIXTURE, "chunk_20260701-1230-LAPTOP-0IM1OHQH")
+    assert list_gt_sessions(chunk_dir) == []

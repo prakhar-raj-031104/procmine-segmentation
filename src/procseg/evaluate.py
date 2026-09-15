@@ -202,3 +202,69 @@ def evaluate_session(session_dir: str, tolerances=(3.0, 5.0, 8.0)) -> SessionEva
 
 def evaluate_dataset(session_dirs: list[str], tolerances=(3.0, 5.0, 8.0)) -> list[SessionEvalResult]:
     return [evaluate_session(d, tolerances) for d in session_dirs]
+
+
+def list_gt_sessions(dataset_dir: str) -> list[str]:
+    """Session directories under a dataset folder that have ground truth
+    (i.e. can actually be scored) — sorted for deterministic, resumable
+    output order across a long run."""
+    out = []
+    for d in sorted(os.listdir(dataset_dir)):
+        p = os.path.join(dataset_dir, d)
+        if os.path.isdir(p) and d.startswith("ses_") and os.path.exists(os.path.join(p, "gt_manifest.json")):
+            out.append(p)
+    return out
+
+
+def main() -> None:
+    import argparse
+
+    ap = argparse.ArgumentParser(description="Evaluate the pipeline against Dataset A ground truth.")
+    ap.add_argument("--dataset", required=True, help="Path to a folder of sessions with gt_manifest.json")
+    ap.add_argument("--tolerances", default="3,5,8", help="Comma-separated boundary tolerances in seconds")
+    args = ap.parse_args()
+
+    tolerances = tuple(float(t) for t in args.tolerances.split(","))
+    sessions = list_gt_sessions(args.dataset)
+    if not sessions:
+        print(f"No sessions with gt_manifest.json found under {args.dataset}")
+        return
+
+    print(f"Evaluating {len(sessions)} sessions...\n")
+    header = f'{"session":42s} {"pred":>5s} {"gt":>4s} ' + " ".join(
+        f"F1@{t:g}s".rjust(8) for t in tolerances
+    ) + f' {"purity":>7s} {"IoU":>6s}'
+    print(header)
+
+    results: list[SessionEvalResult] = []
+    errors: list[tuple[str, str]] = []
+    for i, d in enumerate(sessions, 1):
+        try:
+            r = evaluate_session(d, tolerances)
+        except Exception as e:  # noqa: BLE001 — one bad session must not abort a 63-session run
+            errors.append((os.path.basename(d), str(e)))
+            print(f"  [{i}/{len(sessions)}] ERROR  {os.path.basename(d)}: {e}")
+            continue
+        results.append(r)
+        line = f'{r.session_id:42s} {r.n_predicted:5d} {r.n_gt:4d} '
+        line += " ".join(f'{r.boundary_at[t]["f1"]:8.3f}' for t in tolerances)
+        line += f' {r.overall_purity:7.3f} {r.mean_iou:6.3f}'
+        print(f"  [{i}/{len(sessions)}] {line}")
+
+    n = len(results)
+    print()
+    if errors:
+        print(f"{len(errors)} session(s) failed to evaluate (see ERROR lines above) — not included below.")
+    if n == 0:
+        print("No sessions evaluated successfully.")
+        return
+
+    print(f"=== AGGREGATE across {n} session(s) ===")
+    for t in tolerances:
+        print(f"F1@{t:g}s:  {sum(r.boundary_at[t]['f1'] for r in results) / n:.3f}")
+    print(f"Purity: {sum(r.overall_purity for r in results) / n:.3f}")
+    print(f"IoU:    {sum(r.mean_iou for r in results) / n:.3f}")
+
+
+if __name__ == "__main__":
+    main()

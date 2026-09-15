@@ -274,6 +274,16 @@ disclosed output; silently excluding it would hide exactly the risk Stage
 JSONL round-trip including a Japanese-label case). 120/120 tests passing
 overall.
 
+**Added an `evaluate.py` CLI too** (`python -m procseg.evaluate --dataset
+...`) — until now evaluation was library-only, callable from a script but
+not directly runnable. Wraps each session's scoring in try/except so one
+bad session (plausible at 63-session scale, only 6 tested so far) doesn't
+abort the whole run — reports the error inline and aggregates over whatever
+succeeded. Ran it for real against all 6 available Dataset A sessions;
+output matches the manually-computed numbers from Stage 5 exactly. 2 more
+tests (session discovery). 122/122 tests passing overall.
+
+
 
 
 
