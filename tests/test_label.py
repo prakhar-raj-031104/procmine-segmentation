@@ -6,8 +6,10 @@ from procseg.annotate import CompletionButton, annotate
 from procseg.clean import clean
 from procseg.label import (
     canonical_label,
+    confidence_level,
     label_segments,
     slugify_document,
+    slugify_system_hint,
     variant_tag,
 )
 from procseg.parser import load_session
@@ -20,8 +22,8 @@ FIXTURE = os.path.join(
 T0 = datetime(2026, 7, 1, 12, 0, 0, tzinfo=timezone.utc)
 
 
-def _seg(route=None, mode="route", docs=None, completions=None):
-    s = Segment(start=T0, end=T0 + timedelta(seconds=30), route=route, mode=mode)
+def _seg(route=None, mode="route", docs=None, completions=None, anchor_kind="route"):
+    s = Segment(start=T0, end=T0 + timedelta(seconds=30), route=route, mode=mode, anchor_kind=anchor_kind)
     if docs:
         s.documents = set(docs)
     if completions:
@@ -82,7 +84,57 @@ def test_canonical_label_no_route_no_document_is_unknown_local():
     assert canonical_label(_seg(route=None)) == "unknown_local"
 
 
-# --- variant_tag ---------------------------------------------------------
+# --- slugify_system_hint (preserves Japanese, unlike slugify_document) ------
+
+def test_slugify_system_hint_preserves_japanese():
+    assert slugify_system_hint("財務会計システム") == "財務会計システム"
+
+
+def test_slugify_system_hint_normalizes_separators():
+    assert slugify_system_hint("ProcMine SSO — シングルサインオン") == "ProcMine_SSO_シングルサインオン"
+
+
+def test_slugify_system_hint_empty_falls_back():
+    assert slugify_system_hint("   ") == "unknown_system"
+
+
+# --- canonical_label: system_hint fallback mode -----------------------------
+
+def test_canonical_label_system_hint_mode():
+    seg = _seg(route="財務会計システム", anchor_kind="system_hint")
+    assert canonical_label(seg) == "system_財務会計システム"
+
+
+def test_canonical_label_document_mode_takes_priority_over_system_hint():
+    seg = _seg(route="財務会計システム", mode="document", anchor_kind="system_hint",
+               docs=["supplier_list.xlsx"])
+    assert canonical_label(seg) == "document_task_supplier_list"
+
+
+def test_canonical_label_same_system_hint_always_same_label():
+    labels = {canonical_label(_seg(route="財務会計システム", anchor_kind="system_hint")) for _ in range(5)}
+    assert len(labels) == 1
+
+
+# --- confidence_level --------------------------------------------------------
+
+def test_confidence_high_for_route_with_completion():
+    btn = CompletionButton("rt", "confirm", "btn success")
+    seg = _seg(route="resident-tax", completions=[btn])
+    assert confidence_level(seg) == "high"
+
+
+def test_confidence_medium_for_route_without_completion():
+    seg = _seg(route="resident-tax", completions=[])
+    assert confidence_level(seg) == "medium"
+
+
+def test_confidence_low_for_system_hint_fallback():
+    seg = _seg(route="財務会計システム", anchor_kind="system_hint", completions=[])
+    assert confidence_level(seg) == "low"
+
+
+
 
 def test_variant_standard_on_success():
     btn = CompletionButton("rt", "confirm", "btn success")
@@ -139,3 +191,25 @@ def test_label_consistency_on_real_fixture():
     labels_seen = {l.label for l in labeled}
     assert "resident_tax_check" in labels_seen
     assert "unconfirmed" in {l.variant for l in labeled} or True  # not asserted strictly, just doesn't crash
+
+
+FALLBACK_FIXTURE = os.path.join(
+    os.path.dirname(__file__), "..", "data", "sample_a", "ses_20260630-121953-LAPTOP-R36BQBTE"
+)
+
+
+def test_label_on_extension_down_fixture_is_consistent_and_low_confidence():
+    events = load_session(FALLBACK_FIXTURE)
+    labeled = label_segments(clean(events, segment(annotate(events))))
+
+    assert len(labeled) > 5
+    assert all(l.confidence == "low" for l in labeled)
+    assert all(l.label.startswith("system_") or l.label.startswith("document_task_") for l in labeled)
+
+    # same system still gets the same label consistently, even in fallback mode
+    by_route: dict[str, set[str]] = {}
+    for l in labeled:
+        if l.route:
+            by_route.setdefault(l.route, set()).add(l.label)
+    for route, labels in by_route.items():
+        assert len(labels) == 1, f"{route} got inconsistent labels: {labels}"

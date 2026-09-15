@@ -26,7 +26,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from .annotate import AnnotatedEvent, CompletionButton
+from .annotate import AnnotatedEvent, CompletionButton, route_coverage
+
+# Below this fraction of live-route coverage, a session is treated as having
+# no working route signal for its entire duration (verified: healthy
+# sessions measure 0.72-0.77; the one real broken session — extension never
+# connected — measures exactly 0.0. Wide margin either side of this cutoff.)
+ROUTE_COVERAGE_FALLBACK_THRESHOLD = 0.1
 
 # Segments shorter than this, sharing a route with a neighbour, are flicker —
 # absorbed rather than treated as a real unit of work.
@@ -48,6 +54,7 @@ class Segment:
     documents: set[str] = field(default_factory=set)
     completions: list[tuple[CompletionButton, datetime]] = field(default_factory=list)
     mode: str = "route"  # "route" | "document"
+    anchor_kind: str = "route"  # "route" | "system_hint" — which signal produced this boundary
 
     @property
     def duration_seconds(self) -> float:
@@ -62,18 +69,27 @@ class Segment:
         return any("success" in btn.css_class for btn, _ in self.completions)
 
 
-def build_raw_segments(annotated: list[AnnotatedEvent]) -> list[Segment]:
-    """One segment per contiguous run of the same route; non-route events
-    extend the currently open segment rather than starting a new one."""
+def build_raw_segments(
+    annotated: list[AnnotatedEvent], anchor_attr: str = "route", anchor_kind: str = "route"
+) -> list[Segment]:
+    """One segment per contiguous run of the same anchor value; events
+    without a live anchor extend the currently open segment rather than
+    starting a new one.
+
+    `anchor_attr` selects which AnnotatedEvent field identifies the task —
+    'route' (default, the normal case) or 'system_hint' (the fallback used
+    when a session has no working route signal at all — see `segment()`).
+    """
     segments: list[Segment] = []
     current: Segment | None = None
 
     for a in annotated:
-        if a.route is not None:
-            if current is None or current.route != a.route:
+        val = getattr(a, anchor_attr)
+        if val is not None:
+            if current is None or current.route != val:
                 if current is not None:
                     segments.append(current)
-                current = Segment(start=a.ts, end=a.ts, route=a.route, port=a.port)
+                current = Segment(start=a.ts, end=a.ts, route=val, port=a.port, anchor_kind=anchor_kind)
             current.end = a.ts
             if a.document:
                 current.documents.add(a.document)
@@ -172,8 +188,16 @@ def coalesce_adjacent_same_route(segments: list[Segment]) -> list[Segment]:
 
 
 def segment(annotated: list[AnnotatedEvent]) -> list[Segment]:
-    """Stage 2 entry point: annotated events -> cleaned raw segments."""
-    raw = build_raw_segments(annotated)
+    """Stage 2 entry point. Selects the anchor automatically per session:
+    route-based (normal case) when the session has a working route signal,
+    or system-hint-based (fallback) when it doesn't — verified against a
+    real session where the browser extension never connected, so route was
+    unavailable for the entire recording. See ROUTE_COVERAGE_FALLBACK_THRESHOLD.
+    """
+    if route_coverage(annotated) >= ROUTE_COVERAGE_FALLBACK_THRESHOLD:
+        raw = build_raw_segments(annotated, anchor_attr="route", anchor_kind="route")
+    else:
+        raw = build_raw_segments(annotated, anchor_attr="system_hint", anchor_kind="system_hint")
     collapsed = collapse_document_mode(raw)
     micro_merged = merge_micro_segments(collapsed)
     return coalesce_adjacent_same_route(micro_merged)

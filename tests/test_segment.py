@@ -18,11 +18,13 @@ FIXTURE = os.path.join(
 T0 = datetime(2026, 7, 1, 12, 0, 0, tzinfo=timezone.utc)
 
 
-def _mk(route=None, doc=None, completion=None, offset_s=0):
+def _mk(route=None, doc=None, completion=None, offset_s=0, system_hint=None, app_class=None):
     ts = T0 + timedelta(seconds=offset_s)
     ev = Event(ts=ts, iso=ts.isoformat(), event_type="x", app_name=None, window_title=None, url=None, chunk_id=None)
+    resolved_app_class = app_class if app_class is not None else ("browser" if route else "other")
     return AnnotatedEvent(event=ev, route=route, on_route=route is not None, port=None,
-                          document=doc, app_class="browser" if route else "other", completion=completion)
+                          document=doc, system_hint=system_hint,
+                          app_class=resolved_app_class, completion=completion)
 
 
 # --- build_raw_segments -----------------------------------------------------
@@ -161,7 +163,31 @@ def test_micro_merge_does_not_touch_substantial_segments():
     assert len(cleaned) == 2
 
 
-# --- segment(): full pipeline -------------------------------------------------
+# --- system_hint fallback mode ----------------------------------------------
+
+def test_segment_uses_route_mode_when_coverage_is_healthy():
+    events = [_mk(route="resident-tax", offset_s=0), _mk(route="payroll-items", offset_s=30)]
+    segs = segment(events)
+    assert all(s.anchor_kind == "route" for s in segs)
+
+
+def test_segment_falls_back_to_system_hint_when_route_entirely_absent():
+    # route is None throughout (extension-down case) but browser is
+    # foreground (app_class='browser', on_route=False) with a system_hint
+    # available — this is the real signal profile of the broken session.
+    events = [
+        _mk(route=None, system_hint="財務会計システム", offset_s=0, app_class="browser"),
+        _mk(route=None, system_hint="財務会計システム", offset_s=10, app_class="browser"),
+        _mk(route=None, system_hint="HR人事給与システム", offset_s=20, app_class="browser"),
+        _mk(route=None, system_hint="HR人事給与システム", offset_s=30, app_class="browser"),
+    ]
+    segs = segment(events)
+    assert len(segs) == 2
+    assert [s.route for s in segs] == ["財務会計システム", "HR人事給与システム"]
+    assert all(s.anchor_kind == "system_hint" for s in segs)
+
+
+
 
 def test_segment_orchestrates_all_steps():
     events = [
@@ -187,3 +213,20 @@ def test_segment_smoke_on_real_fixture():
     # session spans ~23 minutes end to end
     span_min = (segs[-1].end - segs[0].start).total_seconds() / 60
     assert span_min > 15
+
+
+FALLBACK_FIXTURE = os.path.join(
+    os.path.dirname(__file__), "..", "data", "sample_a", "ses_20260630-121953-LAPTOP-R36BQBTE"
+)
+
+
+def test_segment_smoke_on_real_extension_down_fixture():
+    """Regression test locked to the exact real session that originally
+    produced zero segments (browser extension never connected — no
+    browser_navigation/browser_click/extension_connected events anywhere)."""
+    events = load_session(FALLBACK_FIXTURE)
+    ann = annotate(events)
+    segs = segment(ann)
+
+    assert len(segs) > 5  # previously: 0
+    assert all(s.anchor_kind == "system_hint" for s in segs)

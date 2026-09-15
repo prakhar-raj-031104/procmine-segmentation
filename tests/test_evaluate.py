@@ -25,7 +25,7 @@ def _t(s):
 
 
 def _lab(start_s, end_s, label):
-    return LabeledSegment(start=_t(start_s), end=_t(end_s), label=label, variant="standard", route=None, mode="route", n_completions=1)
+    return LabeledSegment(start=_t(start_s), end=_t(end_s), label=label, variant="standard", confidence="high", route=None, mode="route", n_completions=1)
 
 
 def _gt(start_s, end_s, code):
@@ -141,3 +141,19 @@ def test_evaluate_session_on_real_fixture_produces_sane_scores():
     # sanity floor: the pipeline should be well above random on data it was designed for
     assert result.boundary_at[8.0]["f1"] > 0.5
     assert result.overall_purity > 0.5
+
+
+FALLBACK_FIXTURE = os.path.join(
+    os.path.dirname(__file__), "..", "data", "sample_a", "ses_20260630-121953-LAPTOP-R36BQBTE"
+)
+
+
+def test_evaluate_session_on_extension_down_fixture_no_longer_returns_zero():
+    """Regression test: this exact session originally produced 0 predicted
+    segments (browser extension never connected). The system-hint fallback
+    should now produce real, scoreable output — lower confidence than the
+    route-based sessions, but not zero."""
+    result = evaluate_session(FALLBACK_FIXTURE)
+    assert result.n_predicted > 5  # was 0 before the fallback mode existed
+    assert result.overall_purity > 0.0
+    assert result.boundary_at[8.0]["f1"] > 0.0

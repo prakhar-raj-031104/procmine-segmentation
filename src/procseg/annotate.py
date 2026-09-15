@@ -58,6 +58,7 @@ _NOISE_APPS = {
 }
 _DOC_MARKERS = ("Word", "Excel", "Compatibility Mode")
 _DOC_PLACEHOLDER_TITLES = {"opening", "resume reading"}
+_GENERIC_BROWSER_TITLES = {"untitled", "new tab", ""}
 
 # A route that represents navigation between tasks rather than a task itself.
 NON_TASK_ROUTES = {"dashboard"}
@@ -112,6 +113,27 @@ def extract_document(window_title: str | None) -> str | None:
     return base[:80]
 
 
+def extract_system_hint(app_name: str | None, window_title: str | None) -> str | None:
+    """
+    Coarse business-system identity from a browser window title
+    ('財務会計システム - Google Chrome' -> '財務会計システム'), used only as a
+    fallback anchor when no route is available.
+
+    Verified independent of the browser extension: this reads
+    `active_app.window_title` (OS-level), not `active_browser_tab.url`
+    (extension-supplied) — confirmed present and changing sensibly even in a
+    real session where the extension never connected for the whole
+    recording (zero browser_navigation/browser_click/extension_connected
+    events throughout).
+    """
+    if app_name not in BROWSER_APPS or not window_title:
+        return None
+    base = window_title.rsplit(" - ", 1)[0].strip()
+    if base.lower() in _GENERIC_BROWSER_TITLES:
+        return None
+    return base[:80]
+
+
 @dataclass(frozen=True)
 class CompletionButton:
     """A click on a `btn-<prefix>-<verb>` element — the worker's own 'done' signal."""
@@ -146,6 +168,7 @@ class AnnotatedEvent:
     on_route: bool  # True iff the route is live on THIS event
     port: str | None
     document: str | None  # forward-filled document identity
+    system_hint: str | None  # forward-filled coarse system, from window title — fallback anchor
     app_class: str
     completion: CompletionButton | None
 
@@ -169,6 +192,7 @@ def annotate(events: Iterable[Event]) -> list[AnnotatedEvent]:
     cur_route: str | None = None
     cur_port: str | None = None
     cur_doc: str | None = None
+    cur_system_hint: str | None = None
 
     for e in events:
         is_browser = e.app_name in BROWSER_APPS
@@ -184,6 +208,10 @@ def annotate(events: Iterable[Event]) -> list[AnnotatedEvent]:
         if doc_here:
             cur_doc = doc_here
 
+        hint_here = extract_system_hint(e.app_name, e.window_title)
+        if hint_here:
+            cur_system_hint = hint_here
+
         completion = extract_completion(e)
 
         out.append(
@@ -193,8 +221,25 @@ def annotate(events: Iterable[Event]) -> list[AnnotatedEvent]:
                 on_route=is_browser and route_here is not None,
                 port=cur_port,
                 document=cur_doc,
+                system_hint=cur_system_hint,
                 app_class=app_class,
                 completion=completion,
             )
         )
     return out
+
+
+def route_coverage(annotated: Iterable[AnnotatedEvent]) -> float:
+    """Fraction of browser-foreground events that actually carry a live
+    route. Near zero signals the browser extension never supplied route
+    data for this session (verified real case: an entire recording with
+    zero browser_navigation/browser_click/extension_connected events) —
+    Stage 2 uses this to decide whether to fall back to system-hint
+    segmentation. Returns 1.0 when there's no browser activity at all: that
+    is a different, out-of-scope case (no browser signal for either mode to
+    use), not the extension-down case this diagnostic targets."""
+    browser_events = [a for a in annotated if a.app_class == "browser"]
+    if not browser_events:
+        return 1.0
+    live = sum(1 for a in browser_events if a.on_route)
+    return live / len(browser_events)

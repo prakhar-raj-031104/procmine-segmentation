@@ -193,6 +193,61 @@ fallback mode) rather than patched into this one.
 14 new tests (boundary scoring, purity, IoU, in isolation + on the real
 fixture). 85/85 tests passing overall.
 
+---
+
+## Stage 1b — System-hint fallback mode
+
+**Goal:** fix the zero-segment failure found in Stage 5, without touching
+the route-based path that already works.
+
+**The precise cause, traced not guessed:** route and completion-button are
+not independent signals — both come from the browser extension. The broken
+session has zero `browser_navigation`, zero `browser_click`, zero
+`extension_connected` events anywhere; the extension never connected for
+the entire recording. This corrects an assumption from the original signal
+hierarchy (route → button → document → timing as independent fallback
+tiers) — route and button fail *together*, not one after another.
+
+**What survives:** window title. It's OS-level (`active_app.window_title`),
+not extension-supplied, and verified present and changing sensibly
+(`財務会計システム` → `HR人事給与システム` → ... every 30s-3min) even in the
+broken session. This became the fallback anchor.
+
+**Design: session-level mode selection, not mid-session guessing.** A
+`route_coverage` diagnostic (fraction of browser-foreground time with a
+live route) decides once per session which anchor `segment()` uses —
+route (normal) or system-hint (fallback). Measured on real sessions before
+picking a threshold: healthy sessions cluster at 0.72-0.77, the broken one
+at exactly 0.0 — huge margin, threshold set to 0.1. Scoped to session-level
+specifically because the one real failure case is all-or-nothing (extension
+down for the whole recording); building for a hypothetical partial-outage
+mid-session would be designing for evidence we don't have.
+
+**Zero regression, verified not assumed:** all 85 existing tests pass
+unchanged after the refactor — `build_raw_segments` was parameterized
+(which attribute to anchor on) rather than duplicated, so the default path
+is byte-identical to before. Confirmed on real data too: all 5 healthy
+sessions produce the same evaluation numbers as before this change.
+
+**Confidence is carried into the output, not hidden.** Every segment gets a
+`confidence` field (`high`/`medium`/`low`) — system-hint segments are always
+`low`, route segments are `high` only when closed out by a completion click.
+Labels for fallback segments use a distinct `system_<name>` scheme
+(`slugify_system_hint` deliberately preserves Japanese text — confirmed
+Python's `\w` keeps Unicode word characters by default, unlike the
+ASCII-only `slugify_document` used for filenames).
+
+**Committed a second fixture** — the exact real session that originally
+broke, slimmed the same way as the first — as a permanent regression test,
+not just synthetic cases.
+
+**Result:** the broken session now produces 18 segments (was 0), scoring
+boundary-F1@8s 0.612 and purity 0.75 — correctly lower than the near-perfect
+route-mode sessions (coarser signal, no completion confirmation possible),
+but genuinely usable rather than empty. 6-session aggregate: F1@8s 0.766,
+purity 0.958. 107/107 tests passing overall (22 new).
+
+
 
 
 

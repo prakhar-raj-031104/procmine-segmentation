@@ -10,7 +10,9 @@ from procseg.annotate import (
     extract_document,
     extract_port,
     extract_route,
+    extract_system_hint,
     is_positive_completion,
+    route_coverage,
 )
 from procseg.parser import Event, load_session
 
@@ -136,7 +138,62 @@ def test_is_positive_completion():
     assert is_positive_completion(None) is False
 
 
-# --- classify_app --------------------------------------------------------
+# --- extract_system_hint --------------------------------------------------
+
+def test_extract_system_hint_basic():
+    assert extract_system_hint("Google Chrome", "財務会計システム - Google Chrome") == "財務会計システム"
+
+
+def test_extract_system_hint_none_for_generic_titles():
+    assert extract_system_hint("Google Chrome", "Untitled - Google Chrome") is None
+    assert extract_system_hint("Google Chrome", "New Tab - Google Chrome") is None
+
+
+def test_extract_system_hint_none_for_non_browser_app():
+    assert extract_system_hint("Microsoft Word", "report.docx - Word") is None
+
+
+def test_extract_system_hint_none_without_window_title():
+    assert extract_system_hint("Google Chrome", None) is None
+
+
+def test_extract_system_hint_handles_embedded_dash_in_title():
+    # 'ProcMine SSO — シングルサインオン - Google Chrome': only the trailing
+    # ' - Google Chrome' should be stripped, not the em-dash inside the title.
+    hint = extract_system_hint("Google Chrome", "ProcMine SSO — シングルサインオン - Google Chrome")
+    assert hint == "ProcMine SSO — シングルサインオン"
+
+
+# --- route_coverage ---------------------------------------------------------
+
+def test_route_coverage_full_signal():
+    events = [
+        _mk_event(app_name="Google Chrome", url="http://127.0.0.1:5122/#/resident-tax"),
+        _mk_event(app_name="Google Chrome", url="http://127.0.0.1:5122/#/payroll-items"),
+    ]
+    ann = annotate(events)
+    assert route_coverage(ann) == 1.0
+
+
+def test_route_coverage_zero_when_extension_never_connects():
+    # url is always the bare base address — no '#/route' ever appears —
+    # verified against a real session with zero browser_navigation/
+    # browser_click/extension_connected events throughout.
+    events = [
+        _mk_event(app_name="Google Chrome", url="http://127.0.0.1:5122/"),
+        _mk_event(app_name="Google Chrome", url="http://127.0.0.1:5122/"),
+    ]
+    ann = annotate(events)
+    assert route_coverage(ann) == 0.0
+
+
+def test_route_coverage_no_browser_activity_defaults_to_one():
+    events = [_mk_event(app_name="Microsoft Word", window_title="doc.docx - Word")]
+    ann = annotate(events)
+    assert route_coverage(ann) == 1.0
+
+
+
 
 def test_classify_app_categories():
     assert classify_app("Google Chrome") == "browser"

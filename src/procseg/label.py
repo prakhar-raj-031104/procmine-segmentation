@@ -35,6 +35,8 @@ ROUTE_LABELS = {
 
 _EXT_RE = re.compile(r"\.(docx?|xlsx?|txt|pdf)$", re.IGNORECASE)
 _NON_ALNUM_RE = re.compile(r"[^a-zA-Z0-9]+")
+_SEPARATOR_RE = re.compile(r"[\s\-\u2013\u2014/\\]+")  # spaces, hyphen, en/em dash, slashes
+_NON_WORD_RE = re.compile(r"[^\w]", re.UNICODE)
 
 
 def slugify_document(name: str) -> str:
@@ -45,10 +47,25 @@ def slugify_document(name: str) -> str:
     return slug or "unknown_document"
 
 
+def slugify_system_hint(text: str) -> str:
+    """Slugify a window-title system name while PRESERVING non-ASCII
+    characters — most of these are Japanese, and ASCII-only slugification
+    (as used for document filenames) would strip them to nothing. Verified:
+    Python's \\w matches Unicode word characters by default, so kanji/kana
+    survive this untouched."""
+    slug = _SEPARATOR_RE.sub("_", text.strip())
+    slug = _NON_WORD_RE.sub("", slug)
+    return slug or "unknown_system"
+
+
 def canonical_label(seg: Segment) -> str:
     if seg.mode == "document" and seg.documents:
         primary = sorted(seg.documents)[0]  # deterministic choice when several were touched
         return f"document_task_{slugify_document(primary)}"
+    if seg.anchor_kind == "system_hint" and seg.route:
+        # `route` holds the system-hint text here (build_raw_segments stores
+        # whichever anchor was used into this same field).
+        return f"system_{slugify_system_hint(seg.route)}"
     if seg.route:
         return ROUTE_LABELS.get(seg.route, f"process_{seg.route.replace('-', '_')}")
     return "unknown_local"
@@ -68,12 +85,27 @@ def variant_tag(seg: Segment) -> str:
     return "unconfirmed"
 
 
+def confidence_level(seg: Segment) -> str:
+    """'high': route-anchored and closed out by a completion click.
+    'medium': route-anchored but no completion seen (boundary less certain).
+    'low': system-hint fallback — no route signal was available for this
+    session at all (verified real case: browser extension never connected),
+    so this segment's identity is coarser and its boundary unconfirmed by
+    any completion action."""
+    if seg.anchor_kind == "system_hint":
+        return "low"
+    if seg.has_completion:
+        return "high"
+    return "medium"
+
+
 @dataclass
 class LabeledSegment:
     start: datetime
     end: datetime
     label: str
     variant: str
+    confidence: str
     route: str | None
     mode: str
     n_completions: int
@@ -87,6 +119,7 @@ def label_segments(segments: list[Segment]) -> list[LabeledSegment]:
             end=s.end,
             label=canonical_label(s),
             variant=variant_tag(s),
+            confidence=confidence_level(s),
             route=s.route,
             mode=s.mode,
             n_completions=len(s.completions),
