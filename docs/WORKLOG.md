@@ -323,6 +323,22 @@ Two regression tests added using the exact real title format. Verified
 against the known fallback fixture — unaffected, since its titles have no
 profile suffix. 124/124 tests passing overall.
 
+---
+
+## Final accuracy summary line
+
+Added `overall_accuracy()` to the evaluate CLI — a single headline
+percentage for reporting, computed transparently as the plain mean of the
+already-printed F1@3s/5s/8s and purity numbers. Deliberately NOT a new,
+separately-justified metric: the individual per-tolerance breakdown stays
+printed above it unchanged, so this doesn't hide how sensitive the number
+is to tolerance choice, it just adds one number to quote when a single
+figure is needed. A regression test locks it to the real 63-session
+Dataset A aggregate (F1 .538/.627/.772, purity .977 → 72.9%), so a future
+change to the underlying metrics can't silently change what this number
+means without the test catching it. 128/128 tests passing overall.
+
+
 
 
 

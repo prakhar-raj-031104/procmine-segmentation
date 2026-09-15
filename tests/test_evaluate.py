@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from procseg.evaluate import (
     GTExecution,
+    SessionEvalResult,
     boundary_scores,
     evaluate_session,
     label_purity,
@@ -11,6 +12,7 @@ from procseg.evaluate import (
     load_gt_boundaries,
     load_gt_executions,
     mean_iou,
+    overall_accuracy,
 )
 from procseg.label import LabeledSegment
 
@@ -158,6 +160,45 @@ def test_evaluate_session_on_extension_down_fixture_no_longer_returns_zero():
     assert result.n_predicted > 5  # was 0 before the fallback mode existed
     assert result.overall_purity > 0.0
     assert result.boundary_at[8.0]["f1"] > 0.0
+
+
+# --- overall_accuracy --------------------------------------------------------
+
+def _mk_result(f1_3, f1_5, f1_8, purity):
+    r = SessionEvalResult(
+        session_id="s",
+        n_predicted=1,
+        n_gt=1,
+        boundary_at={3.0: {"f1": f1_3}, 5.0: {"f1": f1_5}, 8.0: {"f1": f1_8}},
+        purity={"A": {"n_executions": 1, "purity": purity, "labels_seen": []}},
+        mean_iou=0.5,
+    )
+    return r
+
+
+def test_overall_accuracy_is_mean_of_f1s_and_purity():
+    r = _mk_result(0.6, 0.6, 0.6, 1.0)  # three F1s at 0.6, purity 1.0 -> mean of [0.6,0.6,0.6,1.0]
+    acc = overall_accuracy([r], tolerances=(3.0, 5.0, 8.0))
+    assert abs(acc - 0.7) < 1e-9
+
+
+def test_overall_accuracy_perfect_pipeline_is_one():
+    r = _mk_result(1.0, 1.0, 1.0, 1.0)
+    assert overall_accuracy([r], tolerances=(3.0, 5.0, 8.0)) == 1.0
+
+
+def test_overall_accuracy_empty_results_is_zero():
+    assert overall_accuracy([], tolerances=(3.0, 5.0, 8.0)) == 0.0
+
+
+def test_overall_accuracy_matches_real_63_session_dataset_a_run():
+    """Locks in the real aggregate numbers reported from the full local
+    Dataset A run (F1@3s .538, F1@5s .627, F1@8s .772, purity .977) so a
+    future change can't silently alter what 'final accuracy' means without
+    this test catching it."""
+    r = _mk_result(0.538, 0.627, 0.772, 0.977)
+    acc = overall_accuracy([r], tolerances=(3.0, 5.0, 8.0))
+    assert abs(acc - 0.7285) < 0.001
 
 
 # --- list_gt_sessions --------------------------------------------------------

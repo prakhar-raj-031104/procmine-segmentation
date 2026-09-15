@@ -216,6 +216,26 @@ def list_gt_sessions(dataset_dir: str) -> list[str]:
     return out
 
 
+def overall_accuracy(results: list[SessionEvalResult], tolerances) -> float:
+    """
+    A single, transparent 'final accuracy' percentage for reporting purposes.
+
+    This is NOT a separate metric — it's the plain average of the boundary
+    F1 scores (across every tolerance reported) and label purity, both of
+    which are already computed and printed individually above. It exists so
+    there is one headline number to quote, without hiding or replacing the
+    per-tolerance breakdown that makes clear how sensitive that number is to
+    the tolerance choice — see the individual F1@Ns lines for that.
+    """
+    if not results:
+        return 0.0
+    n = len(results)
+    f1_means = [sum(r.boundary_at[t]["f1"] for r in results) / n for t in tolerances]
+    purity_mean = sum(r.overall_purity for r in results) / n
+    components = f1_means + [purity_mean]
+    return sum(components) / len(components)
+
+
 def main() -> None:
     import argparse
 
@@ -264,6 +284,9 @@ def main() -> None:
         print(f"F1@{t:g}s:  {sum(r.boundary_at[t]['f1'] for r in results) / n:.3f}")
     print(f"Purity: {sum(r.overall_purity for r in results) / n:.3f}")
     print(f"IoU:    {sum(r.mean_iou for r in results) / n:.3f}")
+    print()
+    acc = overall_accuracy(results, tolerances)
+    print(f"FINAL ACCURACY (mean of F1@{'/'.join(f'{t:g}s' for t in tolerances)} + purity): {acc*100:.1f}%")
 
 
 if __name__ == "__main__":
