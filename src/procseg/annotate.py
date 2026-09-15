@@ -58,7 +58,7 @@ _NOISE_APPS = {
 }
 _DOC_MARKERS = ("Word", "Excel", "Compatibility Mode")
 _DOC_PLACEHOLDER_TITLES = {"opening", "resume reading"}
-_GENERIC_BROWSER_TITLES = {"untitled", "new tab", ""}
+_GENERIC_TITLE_PREFIXES = ("untitled", "new tab", "settings")
 
 # A route that represents navigation between tasks rather than a task itself.
 NON_TASK_ROUTES = {"dashboard"}
@@ -149,12 +149,22 @@ def extract_system_hint(app_name: str | None, window_title: str | None) -> str |
     (63 A + 15 B) — it's a designed, evidence-motivated fallback for a risk
     that hasn't been observed yet, not a validated pattern; segments it
     produces stay tagged low-confidence accordingly.
+
+    Generic-title matching is a PREFIX check, not exact match: a real
+    Dataset B run under this fallback produced 'Settings : Microsoft
+    Teams', an incidental settings screen that should have been filtered
+    like 'Untitled'/'New Tab' — but that title has no ' - ' to split on,
+    so the un-split base is the whole string, never equal to just
+    'settings'. startswith() catches 'Settings', 'Settings - X',
+    'Settings : X', etc. uniformly, without needing to enumerate every
+    separator an app might use.
     """
     app_class = classify_app(app_name)
     if app_class not in _SYSTEM_HINT_APP_CLASSES or not window_title:
         return None
     base = window_title.split(" - ")[0].strip()
-    if base.lower() in _GENERIC_BROWSER_TITLES:
+    base_lower = base.lower()
+    if not base_lower or base_lower.startswith(_GENERIC_TITLE_PREFIXES):
         return None
     return base[:80]
 

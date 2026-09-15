@@ -203,6 +203,31 @@ def test_extract_system_hint_still_none_for_noise_apps():
     assert extract_system_hint("Windows Explorer", "Documents") is None
 
 
+def test_extract_system_hint_filters_settings_screen_alone():
+    assert extract_system_hint("Microsoft Teams", "Settings") is None
+
+
+def test_extract_system_hint_filters_settings_with_dash_separator():
+    assert extract_system_hint("Microsoft Teams", "Settings - Microsoft Teams") is None
+
+
+def test_extract_system_hint_filters_settings_with_no_dash_separator():
+    # Real bug: Dataset B produced 'system_Settings__Microsoft_Teams' —
+    # the actual title has no ' - ', so split(' - ')[0] returns the WHOLE
+    # string, never equal to just 'settings'. Reconstructed exactly from
+    # the observed slug (double underscore = a colon/pipe separator eaten
+    # by the non-word strip, leaving two adjacent underscores).
+    assert extract_system_hint("Microsoft Teams", "Settings : Microsoft Teams") is None
+    assert extract_system_hint("Microsoft Teams", "Settings | Microsoft Teams") is None
+
+
+def test_extract_system_hint_still_works_for_titles_that_merely_contain_settings_later():
+    # only a LEADING 'settings' is generic — a real system whose name
+    # merely mentions "settings" somewhere later must not be filtered
+    hint = extract_system_hint("SAPGUI.exe", "Payroll Settings Review - SAPGUI")
+    assert hint == "Payroll Settings Review"
+
+
 # --- route_coverage ---------------------------------------------------------
 
 def test_route_coverage_full_signal():

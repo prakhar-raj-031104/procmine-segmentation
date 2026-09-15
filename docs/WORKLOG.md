@@ -305,6 +305,41 @@ locking in the whole chain (annotate → segment → clean → label) working
 together for the scenario this change exists for. 141/141 tests passing
 overall (13 new).
 
+---
+
+## Settings-screen filter (found from the first real use of the native-app fallback)
+
+**The very first time the widened fallback ran on real data, it caught
+exactly the kind of noise anticipated — and revealed the filter for it was
+incomplete.** Re-running Dataset B produced one new segment:
+`system_Settings__Microsoft_Teams`, 10 seconds, from a Teams settings
+screen — not a real business task.
+
+**Root cause, precisely, not guessed:** the generic-title filter
+(`Untitled`/`New Tab`) only ever matched by exact equality, which worked
+because those titles are typically the *entire* window title with nothing
+appended. The real title here was `'Settings : Microsoft Teams'` (reverse-
+engineered from the exact double-underscore slug pattern and confirmed by
+reproducing it byte-for-byte) — no `' - '` to split on, so the un-split
+base is the whole string, never equal to bare `'settings'`. An exact-match
+filter structurally cannot catch a generic marker that's merely a *prefix*
+of a longer title.
+
+**Fix:** changed the filter from exact match to prefix match
+(`str.startswith()` against a tuple), and added `'settings'` to the
+prefix list alongside `'untitled'`/`'new tab'`. Verified this doesn't
+over-match: a real system whose name merely *contains* "settings" later
+in the title (e.g. `'Payroll Settings Review'`) is untouched, since only a
+*leading* match is filtered.
+
+**Verified against the exact reconstructed real scenario** (not just the
+unit-level fix): built the precise 3-event sequence that produced the
+original bug and confirmed the Settings segment no longer appears, only
+the real work after it. Re-ran both full local datasets afterward —
+byte-identical numbers to before, confirming no unrelated regression.
+4 new tests. 145/145 tests passing overall.
+
+
 
 ---
 
