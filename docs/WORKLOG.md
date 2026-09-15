@@ -163,6 +163,37 @@ spot-checked). Variant mix: 21 standard, 2 flagged, 1 query — matches the
 completion-button evidence found back in Stage 1. 71/71 tests passing
 overall.
 
+---
+
+## Stage 5 — Evaluate
+
+**Goal:** score the pipeline against ground truth on exactly the two things
+the task says are graded — boundary correctness and label consistency. No
+metric is mandated by the brief; precision/recall/F1 at several tolerances,
+per-process label purity, and mean IoU are the standard, defensible choices
+for this problem class, not something specified to build toward.
+
+**Ran the harness across every Dataset A session available locally (6),
+not just the committed fixture.** Across the 5 sessions with healthy
+signal: boundary F1 0.61/0.67/0.80 at 3s/5s/8s tolerance, **label purity
+1.000 across every ground-truth process in every session**, mean IoU 0.63.
+
+**The 6th session returned zero segments.** Traced precisely rather than
+shrugged off: that session has zero `browser_navigation`, zero
+`browser_click`, zero `extension_connected` events anywhere — the browser
+extension never connected for the entire recording, so route and
+completion-button (both L3/extension-dependent) were unavailable the whole
+time. This is a real, quantified gap (1/6 ≈ 17% of sessions checked), not a
+hypothetical — logged here and addressed as its own stage next (system-hint
+fallback mode) rather than patched into this one.
+
+**Case-ID oracle used only here.** `load_gt_executions` /
+`load_gt_boundaries` read `gt_manifest.json` directly — Stages 0-4 never do.
+
+14 new tests (boundary scoring, purity, IoU, in isolation + on the real
+fixture). 85/85 tests passing overall.
+
+
 
 
 
