@@ -164,6 +164,22 @@ def test_extract_system_hint_handles_embedded_dash_in_title():
     assert hint == "ProcMine SSO — シングルサインオン"
 
 
+def test_extract_system_hint_strips_chrome_profile_suffix():
+    # Real bug found on Dataset B: with multiple Chrome profiles configured,
+    # the title becomes '<page> - Profile 1 - Google Chrome'. Only the page
+    # title should survive — the profile name is machine-specific noise
+    # that must not fragment one system into multiple labels.
+    hint = extract_system_hint("Google Chrome", "財務会計システム - Profile 1 - Google Chrome")
+    assert hint == "財務会計システム"
+
+
+def test_extract_system_hint_generic_title_still_filtered_with_profile_suffix():
+    # A blank tab with a profile suffix ('Untitled - Profile 1 - Google
+    # Chrome') must still be recognized as generic and filtered — this
+    # slipped through before the fix (became a fake 'Untitled_Profile_1' system).
+    assert extract_system_hint("Google Chrome", "Untitled - Profile 1 - Google Chrome") is None
+
+
 # --- route_coverage ---------------------------------------------------------
 
 def test_route_coverage_full_signal():

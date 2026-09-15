@@ -125,10 +125,17 @@ def extract_system_hint(app_name: str | None, window_title: str | None) -> str |
     real session where the extension never connected for the whole
     recording (zero browser_navigation/browser_click/extension_connected
     events throughout).
+
+    Takes the FIRST ' - '-separated chunk, not just everything-but-the-last:
+    Chrome appends a profile name when multiple profiles are configured
+    ('<title> - Profile 1 - Google Chrome'), which a last-segment strip
+    would leave attached to the label — confirmed on real Dataset B data,
+    where it silently fragmented one system into per-profile labels and let
+    a blank 'Untitled - Profile 1' tab slip past the generic-title filter.
     """
     if app_name not in BROWSER_APPS or not window_title:
         return None
-    base = window_title.rsplit(" - ", 1)[0].strip()
+    base = window_title.split(" - ")[0].strip()
     if base.lower() in _GENERIC_BROWSER_TITLES:
         return None
     return base[:80]

@@ -283,6 +283,47 @@ succeeded. Ran it for real against all 6 available Dataset A sessions;
 output matches the manually-computed numbers from Stage 5 exactly. 2 more
 tests (session discovery). 122/122 tests passing overall.
 
+---
+
+## Full-scale validation — real 63-session Dataset A, real 15-session Dataset B
+
+**Dataset A, all 63 sessions:** F1@3s 0.538, F1@5s 0.627, F1@8s 0.772,
+purity 0.977, IoU 0.602 — matches the 6-session sample almost exactly,
+confirming that sample was representative, not cherry-picked. Zero sessions
+errored out, including 57 never tested before.
+
+**One real pattern found:** all 7 sessions on machine `LAPTOP-R36BQBTE`
+score F1@3s near zero. Traced with a boundary-delta trace (predicted vs.
+nearest ground-truth start) rather than guessed: deltas grow steadily
+(+23s → +54s → +97s → +138s) before snapping negative — the signature of
+under-segmentation (several real executions merged into too few predicted
+segments), not clock skew as first hypothesized. This matches the exact
+"rapid same-tool interleaving with no route change" limitation the pipeline
+was already documented as vulnerable to — confirmed by real data, appears
+operator-specific (7/7 on one machine, no other machine shows it), bounded
+(F1@8s recovers to 0.61-0.83 on 6 of the 7), not chased further to avoid
+overfitting a fix to one operator's rhythm right before the real Dataset B
+run.
+
+**Dataset B, all 15 sessions:** 132 segments, all 15 sessions covered, 121
+via route mode with exactly the 5 known labels (no unmapped routes — full
+generalization from A's route vocabulary), 11 via the system-hint fallback.
+
+**Bug found and fixed from the real B run:** fallback labels came out as
+`system_財務会計システム_Profile_1` instead of `system_財務会計システム` — the
+operator's machine has multiple Chrome profiles configured, giving window
+titles a `<title> - Profile 1 - Google Chrome` shape never seen in any
+tested session. `extract_system_hint` stripped only the last ` - `
+segment, leaving the profile name attached — worse, it let a blank
+`Untitled - Profile 1` tab slip past the generic-title filter entirely,
+producing a fake `system_Untitled_Profile_1` label. Fixed by taking the
+*first* ` - `-separated chunk instead of stripping only the last one (the
+page title is always first; matches how `extract_document` already works).
+Two regression tests added using the exact real title format. Verified
+against the known fallback fixture — unaffected, since its titles have no
+profile suffix. 124/124 tests passing overall.
+
+
 
 
 
