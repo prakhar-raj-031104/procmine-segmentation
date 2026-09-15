@@ -7,6 +7,7 @@ from procseg.clean import clean
 from procseg.label import (
     canonical_label,
     confidence_level,
+    has_corroborating_screen_text,
     label_segments,
     slugify_document,
     slugify_system_hint,
@@ -134,6 +135,28 @@ def test_confidence_low_for_system_hint_fallback():
     assert confidence_level(seg) == "low"
 
 
+def test_confidence_upgraded_to_medium_with_corroborating_screen_text():
+    # Independent evidence: window-title-derived hint AND a separately
+    # captured screen_text snippet agree — stronger than either alone.
+    seg = _seg(route="財務会計システム", anchor_kind="system_hint", completions=[])
+    seg.screen_texts = {"財務会計システム 2026年度 · 経理部"}
+    assert confidence_level(seg) == "medium"
+
+
+def test_confidence_stays_low_without_corroboration():
+    seg = _seg(route="財務会計システム", anchor_kind="system_hint", completions=[])
+    seg.screen_texts = set()
+    assert confidence_level(seg) == "low"
+
+
+def test_confidence_stays_low_with_irrelevant_screen_text():
+    # captured text exists, but doesn't mention this segment's system —
+    # not corroboration, must not be treated as such
+    seg = _seg(route="財務会計システム", anchor_kind="system_hint", completions=[])
+    seg.screen_texts = {"何か関係のないテキスト"}
+    assert confidence_level(seg) == "low"
+
+
 
 
 def test_variant_standard_on_success():
@@ -203,7 +226,7 @@ def test_label_on_extension_down_fixture_is_consistent_and_low_confidence():
     labeled = label_segments(clean(events, segment(annotate(events))))
 
     assert len(labeled) > 5
-    assert all(l.confidence == "low" for l in labeled)
+    assert all(l.confidence in ("low", "medium") for l in labeled)  # widened: corroboration may upgrade some
     assert all(l.label.startswith("system_") or l.label.startswith("document_task_") for l in labeled)
 
     # same system still gets the same label consistently, even in fallback mode
@@ -213,3 +236,45 @@ def test_label_on_extension_down_fixture_is_consistent_and_low_confidence():
             by_route.setdefault(l.route, set()).add(l.label)
     for route, labels in by_route.items():
         assert len(labels) == 1, f"{route} got inconsistent labels: {labels}"
+
+
+def test_end_to_end_native_app_task_is_no_longer_invisible():
+    """The exact gap raised and fixed in this change: a task done entirely
+    inside a genuinely native, non-browser app (never Chrome/Edge, never
+    Word/Excel/Notepad) used to produce ZERO segments for its whole
+    duration — route_coverage() defaulted to 1.0 (staying in route mode,
+    which needs a browser) and extract_system_hint() only covered browsers.
+    Both are fixed; this proves the full chain (annotate -> segment ->
+    clean -> label) now produces a real, labeled, low-confidence segment
+    instead of silence."""
+    from procseg.parser import Event
+
+    t0 = datetime(2026, 7, 1, 9, 0, 0, tzinfo=timezone.utc)
+
+    def ev(offset_s, app_name, window_title, extracted_text=None):
+        ts = t0 + timedelta(seconds=offset_s)
+        raw = {"event_type": "mouse_click", "payload": {}}
+        if extracted_text:
+            raw["context"] = {"extracted_text": extracted_text}
+        return Event(ts=ts, iso=ts.isoformat(), event_type="mouse_click",
+                     app_name=app_name, window_title=window_title, url=None,
+                     chunk_id="c", raw=raw)
+
+    events = [
+        ev(0, "SAPGUI.exe", "Accounts Payable Module - SAPGUI"),
+        ev(5, "SAPGUI.exe", "Accounts Payable Module - SAPGUI",
+           extracted_text="Accounts Payable Module\nInvoice queue: 4 pending"),
+        ev(10, "SAPGUI.exe", "Accounts Payable Module - SAPGUI"),
+        ev(40, "SAPGUI.exe", "Inventory Adjustment - SAPGUI"),  # a second, different native task
+        ev(45, "SAPGUI.exe", "Inventory Adjustment - SAPGUI"),
+    ]
+
+    ann = annotate(events)
+    segs = clean(events, segment(ann))
+    labeled = label_segments(segs)
+
+    assert len(labeled) == 2  # was 0 before this change
+    assert labeled[0].label == "system_Accounts_Payable_Module"
+    assert labeled[0].confidence == "medium"  # corroborated by the screen_text snippet
+    assert labeled[1].label == "system_Inventory_Adjustment"
+    assert labeled[1].confidence == "low"  # no corroborating text captured for this one

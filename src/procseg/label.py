@@ -85,15 +85,30 @@ def variant_tag(seg: Segment) -> str:
     return "unconfirmed"
 
 
+def has_corroborating_screen_text(seg: Segment) -> bool:
+    """Whether any captured screen_text independently agrees with this
+    segment's system-hint identity — i.e. the window-title-derived name
+    also shows up in a separately-captured text snippet (from an
+    app_switch/mouse_click event; see annotate.extract_screen_text). Two
+    independently-sourced signals agreeing is meaningfully stronger evidence
+    than the window title alone."""
+    if not seg.route:
+        return False
+    return any(seg.route in st for st in seg.screen_texts)
+
+
 def confidence_level(seg: Segment) -> str:
     """'high': route-anchored and closed out by a completion click.
-    'medium': route-anchored but no completion seen (boundary less certain).
-    'low': system-hint fallback — no route signal was available for this
-    session at all (verified real case: browser extension never connected),
-    so this segment's identity is coarser and its boundary unconfirmed by
-    any completion action."""
+    'medium': route-anchored but no completion seen (boundary less certain)
+    — OR system-hint fallback where a separately-captured screen_text
+    snippet independently corroborates the window-title guess.
+    'low': system-hint fallback with no corroborating evidence — no route
+    signal was available for this session at all (verified real case:
+    browser extension never connected, or a genuinely unrecognized native
+    app), so this segment's identity is coarser and its boundary
+    unconfirmed by any completion action."""
     if seg.anchor_kind == "system_hint":
-        return "low"
+        return "medium" if has_corroborating_screen_text(seg) else "low"
     if seg.has_completion:
         return "high"
     return "medium"

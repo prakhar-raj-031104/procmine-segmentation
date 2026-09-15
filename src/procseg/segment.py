@@ -52,6 +52,7 @@ class Segment:
     route: str | None
     port: str | None = None
     documents: set[str] = field(default_factory=set)
+    screen_texts: set[str] = field(default_factory=set)  # opportunistic corroboration — see annotate.extract_screen_text
     completions: list[tuple[CompletionButton, datetime]] = field(default_factory=list)
     mode: str = "route"  # "route" | "document"
     anchor_kind: str = "route"  # "route" | "system_hint" — which signal produced this boundary
@@ -100,6 +101,8 @@ def build_raw_segments(
                 if a.document:
                     current.documents.add(a.document)
 
+        if current is not None and a.screen_text:
+            current.screen_texts.add(a.screen_text)
         if current is not None and a.completion is not None:
             current.completions.append((a.completion, a.ts))
 
@@ -131,6 +134,7 @@ def collapse_document_mode(
                 prev.end = seg.end
                 prev.route = seg.route  # the task ends on whichever route it lands on
                 prev.documents |= seg.documents
+                prev.screen_texts |= seg.screen_texts
                 prev.completions += seg.completions
                 prev.mode = "document"
                 continue
@@ -153,6 +157,7 @@ def merge_micro_segments(
             prev = cleaned[-1]
             prev.end = seg.end
             prev.documents |= seg.documents
+            prev.screen_texts |= seg.screen_texts
             prev.completions += seg.completions
             continue
         cleaned.append(seg)
@@ -164,6 +169,7 @@ def merge_micro_segments(
         nxt = cleaned[0]
         nxt.start = lead.start
         nxt.documents |= lead.documents
+        nxt.screen_texts |= lead.screen_texts
         nxt.completions = lead.completions + nxt.completions
 
     return cleaned
@@ -181,6 +187,7 @@ def coalesce_adjacent_same_route(segments: list[Segment]) -> list[Segment]:
         if out[-1].route == seg.route:
             out[-1].end = seg.end
             out[-1].documents |= seg.documents
+            out[-1].screen_texts |= seg.screen_texts
             out[-1].completions += seg.completions
         else:
             out.append(seg)

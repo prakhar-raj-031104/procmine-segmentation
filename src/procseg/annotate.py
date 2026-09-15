@@ -113,9 +113,12 @@ def extract_document(window_title: str | None) -> str | None:
     return base[:80]
 
 
+_SYSTEM_HINT_APP_CLASSES = {"browser", "other"}
+
+
 def extract_system_hint(app_name: str | None, window_title: str | None) -> str | None:
     """
-    Coarse business-system identity from a browser window title
+    Coarse business-system identity from a foreground window title
     ('財務会計システム - Google Chrome' -> '財務会計システム'), used only as a
     fallback anchor when no route is available.
 
@@ -132,13 +135,55 @@ def extract_system_hint(app_name: str | None, window_title: str | None) -> str |
     would leave attached to the label — confirmed on real Dataset B data,
     where it silently fragmented one system into per-profile labels and let
     a blank 'Untitled - Profile 1' tab slip past the generic-title filter.
+
+    Widened beyond browser windows to also cover genuinely unrecognized
+    foreground apps (app_class 'other') — a task done entirely inside a
+    native, non-browser business app would otherwise have no anchor at all
+    (route needs the extension; the old version of this function required a
+    browser too), producing zero segments for its whole duration. Deliberately
+    NOT widened to spreadsheet/document/notes apps: extract_document() already
+    gives Word/Excel a more specific, already-validated identity than a
+    shared tool's window title would, and Excel/Notepad are explicitly the
+    apps proven to carry no task identity of their own (used in most
+    processes). This 'other' case has no real example in any tested session
+    (63 A + 15 B) — it's a designed, evidence-motivated fallback for a risk
+    that hasn't been observed yet, not a validated pattern; segments it
+    produces stay tagged low-confidence accordingly.
     """
-    if app_name not in BROWSER_APPS or not window_title:
+    app_class = classify_app(app_name)
+    if app_class not in _SYSTEM_HINT_APP_CLASSES or not window_title:
         return None
     base = window_title.split(" - ")[0].strip()
     if base.lower() in _GENERIC_BROWSER_TITLES:
         return None
     return base[:80]
+
+
+def extract_screen_text(event: Event) -> str | None:
+    """
+    Opportunistic corroborating signal: on-screen text the recording agent
+    captured directly (already digitized — not screenshot OCR; verified 0%
+    coverage on screenshot_smart events specifically). Real coverage
+    measured across the full local dataset: 14.8% of app_switch events,
+    12.5% of mouse_click events, elsewhere negligible — never a primary
+    anchor at that density, but when present it's rich (department names,
+    operator names, case IDs, full menu text), so it's used to corroborate
+    a system_hint already derived from the window title, bumping confidence
+    from 'low' to 'medium' when the two independently agree.
+
+    Deliberately NOT forward-filled (unlike route/document/system_hint):
+    this text is closer to a point-in-time snapshot than a stable "current
+    state" — forward-filling it risks a segment inheriting stale text
+    genuinely left over from a previous task, which is exactly the kind of
+    false corroboration that would undermine the confidence signal it's
+    meant to strengthen.
+    """
+    txt = event.context.get("extracted_text")
+    if isinstance(txt, dict):
+        txt = txt.get("text")
+    if not isinstance(txt, str) or not txt.strip():
+        return None
+    return txt.strip()[:500]
 
 
 @dataclass(frozen=True)
@@ -176,6 +221,7 @@ class AnnotatedEvent:
     port: str | None
     document: str | None  # forward-filled document identity
     system_hint: str | None  # forward-filled coarse system, from window title — fallback anchor
+    screen_text: str | None  # THIS event's own on-screen text, if captured — never forward-filled
     app_class: str
     completion: CompletionButton | None
 
@@ -229,6 +275,7 @@ def annotate(events: Iterable[Event]) -> list[AnnotatedEvent]:
                 port=cur_port,
                 document=cur_doc,
                 system_hint=cur_system_hint,
+                screen_text=extract_screen_text(e),
                 app_class=app_class,
                 completion=completion,
             )
@@ -242,11 +289,18 @@ def route_coverage(annotated: Iterable[AnnotatedEvent]) -> float:
     data for this session (verified real case: an entire recording with
     zero browser_navigation/browser_click/extension_connected events) —
     Stage 2 uses this to decide whether to fall back to system-hint
-    segmentation. Returns 1.0 when there's no browser activity at all: that
-    is a different, out-of-scope case (no browser signal for either mode to
-    use), not the extension-down case this diagnostic targets."""
+    segmentation.
+
+    Returns 0.0 when there's no browser activity at all. This USED to
+    return 1.0 (treated as "not an extension problem, out of scope") — but
+    that was only correct while the fallback anchor was browser-only. Now
+    that extract_system_hint() also covers genuinely unrecognized
+    foreground apps ('other' class — e.g. a native, non-browser business
+    app), a browser-less session can still be usefully segmented via the
+    fallback, so it must trigger it rather than stay in route mode, where
+    it would silently produce zero segments for its entire duration."""
     browser_events = [a for a in annotated if a.app_class == "browser"]
     if not browser_events:
-        return 1.0
+        return 0.0
     live = sum(1 for a in browser_events if a.on_route)
     return live / len(browser_events)

@@ -18,12 +18,12 @@ FIXTURE = os.path.join(
 T0 = datetime(2026, 7, 1, 12, 0, 0, tzinfo=timezone.utc)
 
 
-def _mk(route=None, doc=None, completion=None, offset_s=0, system_hint=None, app_class=None):
+def _mk(route=None, doc=None, completion=None, offset_s=0, system_hint=None, app_class=None, screen_text=None):
     ts = T0 + timedelta(seconds=offset_s)
     ev = Event(ts=ts, iso=ts.isoformat(), event_type="x", app_name=None, window_title=None, url=None, chunk_id=None)
     resolved_app_class = app_class if app_class is not None else ("browser" if route else "other")
     return AnnotatedEvent(event=ev, route=route, on_route=route is not None, port=None,
-                          document=doc, system_hint=system_hint,
+                          document=doc, system_hint=system_hint, screen_text=screen_text,
                           app_class=resolved_app_class, completion=completion)
 
 

@@ -10,6 +10,7 @@ from procseg.annotate import (
     extract_document,
     extract_port,
     extract_route,
+    extract_screen_text,
     extract_system_hint,
     is_positive_completion,
     route_coverage,
@@ -180,6 +181,28 @@ def test_extract_system_hint_generic_title_still_filtered_with_profile_suffix():
     assert extract_system_hint("Google Chrome", "Untitled - Profile 1 - Google Chrome") is None
 
 
+def test_extract_system_hint_now_works_for_native_nonbrowser_apps():
+    # Widened case: a genuinely unrecognized foreground app (not browser,
+    # not Word/Excel/Notepad/Terminal/Explorer) — the native-business-app
+    # gap. No real example exists in any tested session; this is a designed
+    # fallback for an anticipated risk, not a validated pattern.
+    hint = extract_system_hint("SAPGUI.exe", "Accounts Payable Module - SAPGUI")
+    assert hint == "Accounts Payable Module"
+
+
+def test_extract_system_hint_still_none_for_spreadsheet_and_document_apps():
+    # Deliberately NOT widened to Excel/Word — extract_document() already
+    # gives them a more specific identity, and they're the proven
+    # shared-tool apps with no task identity of their own.
+    assert extract_system_hint("Microsoft Excel", "expense_calc.xlsx - Excel") is None
+    assert extract_system_hint("Microsoft Word", "report.docx - Word") is None
+
+
+def test_extract_system_hint_still_none_for_noise_apps():
+    assert extract_system_hint("WindowsTerminal", "user@host: ~") is None
+    assert extract_system_hint("Windows Explorer", "Documents") is None
+
+
 # --- route_coverage ---------------------------------------------------------
 
 def test_route_coverage_full_signal():
@@ -203,10 +226,41 @@ def test_route_coverage_zero_when_extension_never_connects():
     assert route_coverage(ann) == 0.0
 
 
-def test_route_coverage_no_browser_activity_defaults_to_one():
+def test_route_coverage_no_browser_activity_defaults_to_zero():
+    # Was 1.0 ("out of scope, not an extension problem"). Corrected: now
+    # that the fallback also covers native non-browser apps, a browser-less
+    # session must trigger it rather than stay in route mode, where it
+    # would silently produce zero segments for its entire duration.
     events = [_mk_event(app_name="Microsoft Word", window_title="doc.docx - Word")]
     ann = annotate(events)
-    assert route_coverage(ann) == 1.0
+    assert route_coverage(ann) == 0.0
+
+
+# --- extract_screen_text ------------------------------------------------
+
+def test_extract_screen_text_plain_string():
+    ev = _mk_event(raw_extra={"context": {"extracted_text": "財務会計システム 2026年度"}})
+    assert extract_screen_text(ev) == "財務会計システム 2026年度"
+
+
+def test_extract_screen_text_dict_shaped():
+    ev = _mk_event(raw_extra={"context": {"extracted_text": {"text": "SUP-225333-003", "source": "text_pattern"}}})
+    assert extract_screen_text(ev) == "SUP-225333-003"
+
+
+def test_extract_screen_text_none_when_absent():
+    ev = _mk_event()
+    assert extract_screen_text(ev) is None
+
+
+def test_extract_screen_text_none_when_blank():
+    ev = _mk_event(raw_extra={"context": {"extracted_text": "   "}})
+    assert extract_screen_text(ev) is None
+
+
+def test_extract_screen_text_truncated_to_500_chars():
+    ev = _mk_event(raw_extra={"context": {"extracted_text": "x" * 900}})
+    assert len(extract_screen_text(ev)) == 500
 
 
 
@@ -282,6 +336,20 @@ def test_annotate_route_persists_until_a_new_one_is_seen():
     ]
     ann = annotate(events)
     assert [a.route for a in ann] == ["resident-tax", "resident-tax", "payroll-items"]
+
+
+def test_annotate_screen_text_is_not_forward_filled():
+    # Unlike route/document/system_hint, screen_text must NOT persist onto
+    # later events — it's a point-in-time snapshot, and carrying it forward
+    # risks a later segment inheriting stale text from an earlier task.
+    events = [
+        _mk_event(event_type="app_switch", app_name="Google Chrome",
+                  raw_extra={"context": {"extracted_text": "財務会計システム 2026年度"}}),
+        _mk_event(event_type="mouse_click", app_name="Google Chrome"),  # no text of its own
+    ]
+    ann = annotate(events)
+    assert ann[0].screen_text == "財務会計システム 2026年度"
+    assert ann[1].screen_text is None  # NOT inherited from the previous event
 
 
 # --- integration: annotate() over the real committed fixture ----------------

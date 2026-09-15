@@ -249,6 +249,65 @@ purity 0.958. 107/107 tests passing overall (22 new).
 
 ---
 
+## Native-app fallback widening + screen_text corroboration
+
+**Traced, not guessed:** walking through what happens for a task done
+entirely inside a genuinely native, non-browser business app (never
+Chrome/Edge, never Word/Excel/Notepad) — `route` stays None (needs the
+extension), and the *existing* `extract_system_hint` only fired for
+`app_class == 'browser'`. Result: zero anchor, zero segments, for that
+task's entire duration. Worse than the extension-down case already fixed —
+that one at least degraded to low-confidence output; this one degraded to
+silence. No real example of this exists in any of the 78 sessions tested —
+this is a designed fix for a risk surfaced by reasoning through the code,
+not something observed, and is documented as such rather than overclaimed.
+
+**Fixed two things together:**
+1. `route_coverage()` returned 1.0 (→ stay in route mode) for a
+   browser-less session, on the old reasoning that the fallback couldn't
+   help anyway. That reasoning no longer holds once the fallback also
+   covers native apps — changed the default to 0.0 so it correctly
+   triggers the fallback instead of guaranteeing empty output.
+2. Widened `extract_system_hint`'s trigger from `BROWSER_APPS` to
+   `{'browser', 'other'}` (via `classify_app`) — deliberately NOT widened
+   to spreadsheet/document/notes apps, since `extract_document()` already
+   gives Word/Excel a more specific, validated identity, and Excel/Notepad
+   are the proven shared-tool apps with no task identity of their own.
+
+**Screenshots reconsidered, then rejected on evidence — but something
+adjacent accepted.** Checked whether `extracted_text` is effectively "free
+OCR" tied to screenshot capture: measured 0.0% coverage on
+`screenshot_smart` events specifically (disproving that hypothesis), but
+14.8% on `app_switch` and 12.5% on `mouse_click` — and when present, it's
+rich, already-digitized text (department names, operator names, case IDs),
+not noisy OCR. Still not dense enough to be a primary anchor, but useful as
+corroboration: added `extract_screen_text()` (deliberately NOT
+forward-filled, unlike route/document — this is a point-in-time snapshot,
+and forward-filling risks a segment inheriting stale text from a different
+task) and a `confidence_level` upgrade: a system-hint segment moves from
+`low` to `medium` when a captured screen_text snippet independently
+contains the same system name the window title suggested — two
+independently-sourced signals agreeing is real evidence, not doubling down
+on one guess. Opening actual screenshot images remains rejected: the data
+already gives the same information as plain text, cheaper.
+
+**Verified zero regression on real data, not just synthetic tests:**
+re-ran the full evaluation on all 6 available Dataset A sessions
+(F1@3/5/8s 0.508/0.591/0.766, purity 0.958 — byte-identical to before) and
+regenerated Dataset B's `segments.jsonl` (46 segments, identical
+distribution) — neither changed, since all of that real data has healthy
+browser signal and never touches the new code paths.
+
+**New end-to-end test** constructs a fully synthetic native-app session
+(two distinct SAPGUI-style tasks, one with a corroborating screen_text
+snippet) and asserts the exact labels and confidence levels produced —
+locking in the whole chain (annotate → segment → clean → label) working
+together for the scenario this change exists for. 141/141 tests passing
+overall (13 new).
+
+
+---
+
 ## Stage 6 — Run
 
 **Goal:** the actual deliverable. Freeze Stages 0-4 (no more tuning — that
