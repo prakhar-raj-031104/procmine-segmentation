@@ -247,6 +247,34 @@ route-mode sessions (coarser signal, no completion confirmation possible),
 but genuinely usable rather than empty. 6-session aggregate: F1@8s 0.766,
 purity 0.958. 107/107 tests passing overall (22 new).
 
+---
+
+## Stage 6 — Run
+
+**Goal:** the actual deliverable. Freeze Stages 0-4 (no more tuning — that
+discipline happened entirely against Dataset A ground truth, before this
+stage exists) and produce `segments.jsonl` in the exact spec format:
+`{"session_id", "start", "end", "label"}`, timestamps as
+`2026-07-01T18:32:32Z` (no fractional seconds, matching the task's own
+example exactly).
+
+**Ran it for real** on the 5 Dataset B sessions available locally (not a
+synthetic check) via `python -m procseg.run --dataset ... --out ...`: 46
+segments, all 5 known process labels present (`payroll_processing`,
+`leave_application_review`, `onboarding_verification`,
+`resident_tax_check`, `social_insurance_processing`), every session
+covered, output validates against the spec format directly.
+
+**Low-confidence segments are included, not dropped.** The fallback-mode
+test asserts this explicitly — a session-hint segment is still real,
+disclosed output; silently excluding it would hide exactly the risk Stage
+1b was built to surface.
+
+13 new tests (format, session discovery, full-dataset aggregation,
+JSONL round-trip including a Japanese-label case). 120/120 tests passing
+overall.
+
+
 
 
 
